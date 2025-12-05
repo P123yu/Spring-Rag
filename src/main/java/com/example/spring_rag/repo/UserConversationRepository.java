@@ -7,4 +7,5 @@ import java.util.List;
 public interface UserConversationRepository extends JpaRepository<UserConversation, String> {
     // Find all chats for a specific user
     List<UserConversation> findByUserEmailOrderByCreatedAtDesc(String userEmail);
+
 }
