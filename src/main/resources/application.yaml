@@ -1,30 +1,73 @@
+#spring:
+#  application:
+#    name: spring_rag
+#
+#  datasource:
+#    url: jdbc:postgresql://localhost:5433/vectordb
+#    username: myuser
+#    password: mypassword
+#
+#  ai:
+#    openai:
+#      api-key: "AIzaSyAN999X9WQYqsV8mBT5wAaLXJRg-pa-X2g"
+#      base-url: "https://generativelanguage.googleapis.com/v1beta/openai"
+#
+#      # Chat Configuration
+#      chat:
+#        options:
+#          model: "gemini-2.5-flash"
+#        memory:
+#          jdbc:
+#            # This tells Spring AI to create the 'message_store' table automatically
+#            initialize-schema: true
+#
+#      # Embedding Configuration (Fixes the 404 error)
+#      embedding:
+#        options:
+#          model: "text-embedding-004"
+#
+#    vectorstore:
+#      pgvector:
+#        initialize-schema: true
+#        # Gemini text-embedding-004 uses 768 dimensions
+#        dimension: 768
+#        index-type: HNSW
+
+
+
 spring:
   application:
     name: spring_rag
 
-  datasource:
-    url: jdbc:postgresql://localhost:5433/vectordb
-    username: myuser
-    password: mypassword
+  # Force Spring to run your schema.sql on every startup
+  sql:
+    init:
+      mode: always
 
   ai:
     openai:
       api-key: "AIzaSyAN999X9WQYqsV8mBT5wAaLXJRg-pa-X2g"
       base-url: "https://generativelanguage.googleapis.com/v1beta/openai"
-
-      # Chat Configuration
       chat:
         options:
-          model: "gemini-2.5-flash"
-
-      # Embedding Configuration (Fixes the 404 error)
+          model: "gemini-2.0-flash"
       embedding:
         options:
           model: "text-embedding-004"
 
+    # Disable internal schema creation so it uses your schema.sql instead
+    chat:
+      memory:
+        jdbc:
+          initialize-schema: false
+
     vectorstore:
       pgvector:
         initialize-schema: true
-        # Gemini text-embedding-004 uses 768 dimensions
         dimension: 768
         index-type: HNSW
+
+  datasource:
+    url: jdbc:postgresql://localhost:5433/vectordb
+    username: myuser
+    password: mypassword
