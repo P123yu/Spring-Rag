@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: spring_rag
+
+  datasource:
+    url: jdbc:postgresql://localhost:5433/vectordb
+    username: myuser
+    password: mypassword
+
+  ai:
+    openai:
+      api-key: "AIzaSyAN999X9WQYqsV8mBT5wAaLXJRg-pa-X2g"
+      base-url: "https://generativelanguage.googleapis.com/v1beta/openai"
+
+      # Chat Configuration
+      chat:
+        options:
+          model: "gemini-2.5-flash"
+
+      # Embedding Configuration (Fixes the 404 error)
+      embedding:
+        options:
+          model: "text-embedding-004"
+
+    vectorstore:
+      pgvector:
+        initialize-schema: true
+        # Gemini text-embedding-004 uses 768 dimensions
+        dimension: 768
+        index-type: HNSW
