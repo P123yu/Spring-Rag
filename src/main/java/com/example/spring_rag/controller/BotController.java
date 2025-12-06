@@ -474,25 +474,26 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.chat.prompt.SystemPromptTemplate;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.tika.TikaDocumentReader;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.core.io.InputStreamResource;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
+import reactor.core.publisher.Flux;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 @RestController
@@ -572,9 +573,10 @@ public class BotController {
 
     // --- 4. SEARCH / CHAT API ---
     @GetMapping("/search")
-    public String search(@RequestParam String query,
-                         @RequestParam String chatId,
-                         @RequestParam String userEmail) {
+//    @GetMapping(value = "/search", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<String> search(@RequestParam String query,
+                               @RequestParam String chatId,
+                               @RequestParam String userEmail) {
 
         // A. Security Check
         UserConversation conversation = conversationRepository.findById(chatId)
@@ -584,7 +586,7 @@ public class BotController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access Denied");
         }
 
-        // B. RAG Retrieval
+        // B. RAG Retrieval (Synchronous/Blocking)
         List<Document> similarDocs = vectorStore.similaritySearch(
                 SearchRequest.builder().query(query).topK(3).build()
         );
@@ -605,24 +607,26 @@ public class BotController {
         SystemPromptTemplate systemPromptTemplate = new SystemPromptTemplate(systemPromptText);
         var systemMessage = systemPromptTemplate.createMessage(Map.of("information", information));
 
-        // D. Call AI (With Memory)
-        String aiResponse = chatClient.prompt()
+        // D. AUTO-TITLE LOGIC (Run in Background)
+        // We run this asynchronously so we don't delay the first byte of the stream
+        if ("New Chat".equals(conversation.getTitle())) {
+            CompletableFuture.runAsync(() -> {
+                generateAndSaveTitle(conversation, query);
+            });
+        }
+
+        // E. Call AI (Streaming)
+        // We return the Flux directly. Spring Boot handles the streaming to the client.
+        return chatClient.prompt()
                 .system(systemMessage.getText())
                 .user(query)
                 .advisors(a -> a
                         .param("chat_memory_conversation_id", chatId)
                         .param("chat_memory_retrieve_size", 10))
-                .call()
-                .content();
-
-        // E. AUTO-TITLE LOGIC (New Feature)
-        // If the title is currently "New Chat", generate a better one
-        if ("New Chat".equals(conversation.getTitle())) {
-            generateAndSaveTitle(conversation, query);
-        }
-
-        return aiResponse;
+                .stream() // Enable streaming
+                .content(); // Returns Flux<String>
     }
+
 
     // --- Helper to Generate Title ---
     private void generateAndSaveTitle(UserConversation conversation, String userQuery) {

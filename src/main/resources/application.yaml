@@ -46,11 +46,13 @@ spring:
 
   ai:
     openai:
-      api-key: "AIzaSyBXmV_vQ2FcCFtZ483gOqF_TU0bMCg3xMM"
+      api-key: "AIzaSyAAAadgLcTNFyQNUW-CTHx2ArzVZ5qv7n8"
       base-url: "https://generativelanguage.googleapis.com/v1beta/openai"
       chat:
         options:
           model: "gemini-2.5-flash"
+          temperature: 1
+          stream: true
       embedding:
         options:
           model: "text-embedding-004"
