@@ -9,7 +9,7 @@
 #
 #  ai:
 #    openai:
-#      api-key: "AIzaSyAN999X9WQYqsV8mBT5wAaLXJRg-pa-X2g"
+#      api-key: ""
 #      base-url: "https://generativelanguage.googleapis.com/v1beta/openai"
 #
 #      # Chat Configuration
@@ -46,9 +46,10 @@ spring:
 
   ai:
     openai:
-      api-key: "AIzaSyAAAadgLcTNFyQNUW-CTHx2ArzVZ5qv7n8"
+      api-key: ""
       base-url: "https://generativelanguage.googleapis.com/v1beta/openai"
       chat:
+        completion-path: "/chat/completions"
         options:
           model: "gemini-2.5-flash"
           temperature: 1
@@ -73,3 +74,85 @@ spring:
     url: jdbc:postgresql://localhost:5433/vectordb
     username: myuser
     password: mypassword
+
+#
+#
+
+
+
+#spring:
+#  application:
+#    name: spring_rag
+#
+#  # Standard Spring Boot SQL init (Uses Enum: always/never)
+#  sql:
+#    init:
+#      mode: always
+#
+#  ai:
+#    openai:
+#      api-key: ""
+#
+#      chat:
+#        options:
+#          model: "gpt-5o-mini"
+#          temperature: 0.7
+#          stream: true
+#
+#      embedding:
+#        options:
+#          model: "text-embedding-3-small"
+#
+#    # Chat Memory (Uses Enum: always/never in newer versions)
+#    chat:
+#      memory:
+#        repository:
+#          jdbc:
+#            initialize-schema: never
+#
+#    # Vector Store (Uses Boolean: true/false)
+#    vectorstore:
+#      pgvector:
+#        # FIX: Change 'always' to 'true'
+#        initialize-schema: true
+#        # FIX: OpenAI embedding dimension is 1536 (Google was 768)
+#        dimension: 1536
+#        index-type: HNSW
+#
+#  datasource:
+#    url: jdbc:postgresql://localhost:5433/vectordb
+#    username: myuser
+#    password: mypassword
+#
+#spring:
+#  application:
+#    name: spring_rag
+#
+#  sql:
+#    init:
+#      mode: always
+#
+#  ai:
+#    openai:
+#      api-key: ""
+#      base-url: "https://api.deepseek.com/v1"
+#
+#      chat:
+#        options:
+#          model: "deepseek-chat"
+#          temperature: 1.3
+#          stream: true
+#
+#      embedding:
+#        enabled: false   # IMPORTANT: DeepSeek has NO embeddings
+#
+#    vectorstore:
+#      pgvector:
+#        initialize-schema: true
+#        dimension: 1536
+#        index-type: hnsw
+#
+#  datasource:
+#    url: jdbc:postgresql://localhost:5433/vectordb
+#    username: myuser
+#    password: mypassword

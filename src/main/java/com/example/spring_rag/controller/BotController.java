@@ -465,6 +465,284 @@
 
 
 
+//
+//package com.example.spring_rag.controller;
+//
+//import com.example.spring_rag.model.UserConversation;
+//import com.example.spring_rag.repo.UserConversationRepository;
+//import org.springframework.ai.chat.client.ChatClient;
+//import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
+//import org.springframework.ai.chat.messages.Message;
+//import org.springframework.ai.chat.memory.ChatMemory;
+//import org.springframework.ai.chat.prompt.SystemPromptTemplate;
+//import org.springframework.ai.document.Document;
+//import org.springframework.ai.reader.tika.TikaDocumentReader;
+//import org.springframework.ai.transformer.splitter.TokenTextSplitter;
+//import org.springframework.ai.vectorstore.SearchRequest;
+//import org.springframework.ai.vectorstore.VectorStore;
+//import org.springframework.core.io.InputStreamResource;
+//import org.springframework.http.MediaType;
+//import org.springframework.http.ResponseEntity;
+//import org.springframework.web.bind.annotation.*;
+//import org.springframework.http.HttpStatus;
+//import org.springframework.web.multipart.MultipartFile;
+//import org.springframework.web.server.ResponseStatusException;
+//import reactor.core.publisher.Flux;
+//
+//import java.io.IOException;
+//import java.time.LocalDateTime;
+//import java.util.List;
+//import java.util.Map;
+//import java.util.UUID;
+//import java.util.concurrent.CompletableFuture;
+//import java.util.stream.Collectors;
+//
+//@RestController
+//@CrossOrigin
+//public class BotController {
+//
+//    private final VectorStore vectorStore;
+//    private final ChatClient chatClient;
+//    private final UserConversationRepository conversationRepository;
+//    private final ChatMemory chatMemory;
+//
+//    public BotController(VectorStore vectorStore,
+//                         ChatClient.Builder chatClientBuilder,
+//                         ChatMemory chatMemory,
+//                         UserConversationRepository conversationRepository) {
+//
+//        this.vectorStore = vectorStore;
+//        this.conversationRepository = conversationRepository;
+//        this.chatMemory = chatMemory;
+//
+//        this.chatClient = chatClientBuilder
+//                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
+//                .build();
+//    }
+//
+//
+//    @PostMapping("/ingest")
+//    public String ingest(@RequestParam("file") MultipartFile file,
+//                         @RequestParam("category") String category) throws IOException {
+//
+//        // 1. Read the raw document (This creates one huge document)
+//        TikaDocumentReader reader = new TikaDocumentReader(new InputStreamResource(file.getInputStream()));
+//        List<Document> rawDocuments = reader.get();
+//
+//        // 2. SPLIT THE DOCUMENT
+//        // Break it into smaller chunks so it fits the AI model's limit
+//        TokenTextSplitter splitter = new TokenTextSplitter();
+//        List<Document> splitDocuments = splitter.apply(rawDocuments);
+//
+//        // 3. ADD METADATA TO CHUNKS
+//        // We iterate over the split pieces, not the raw one
+//        splitDocuments.forEach(doc -> {
+//            Map<String, Object> metadata = doc.getMetadata();
+//            metadata.put("filename", file.getOriginalFilename());
+//            metadata.put("category", category); // Store the category
+//        });
+//
+//        // 4. Save the chunks to the Vector DB
+//        vectorStore.add(splitDocuments);
+//
+//        return "Document ingested successfully into category: " + category;
+//    }
+//
+//
+//    // --- 1. START NEW CHAT ---
+//    @PostMapping("/chat/new")
+//    public String createNewChat(@RequestParam String userEmail, @RequestParam(defaultValue = "New Chat") String title) {
+//        String newChatId = UUID.randomUUID().toString();
+//        UserConversation conversation = new UserConversation(
+//                newChatId,
+//                userEmail,
+//                title,
+//                LocalDateTime.now()
+//        );
+//        conversationRepository.save(conversation);
+//        return newChatId;
+//    }
+//
+//    // --- 2. GET HISTORY LIST (SIDEBAR) ---
+//    @GetMapping("/chat/history")
+//    public List<UserConversation> getUserChats(@RequestParam String userEmail) {
+//        return conversationRepository.findByUserEmailOrderByCreatedAtDesc(userEmail);
+//    }
+//
+//    // --- 3. GET MESSAGES FOR SPECIFIC CHAT ---
+//    @GetMapping("/chat/messages/{chatId}")
+//    public List<SimpleMessage> getChatMessages(@PathVariable String chatId, @RequestParam String userEmail) {
+//
+//        // Security Check
+//        UserConversation conversation = conversationRepository.findById(chatId)
+//                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Chat not found"));
+//
+//        if (!conversation.getUserEmail().equals(userEmail)) {
+//            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access Denied");
+//        }
+//
+//        // Fetch messages from DB (Last 100)
+//        List<Message> messages = chatMemory.get(chatId);
+//
+//        // Convert to Simple DTO
+//        return messages.stream()
+//                .map(msg -> new SimpleMessage(msg.getMessageType().getValue(), msg.getText()))
+//                .collect(Collectors.toList());
+//    }
+//
+//    // --- 4. SEARCH / CHAT API ---
+//    @GetMapping("/search")
+//    public Flux<String> search(@RequestParam String query,
+//                               @RequestParam String chatId,
+//                               @RequestParam String userEmail,
+//                               @RequestParam(required = false) String category) {
+//
+//        // A. Security Check (Same as before)
+//        UserConversation conversation = conversationRepository.findById(chatId)
+//                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Chat not found"));
+//        if (!conversation.getUserEmail().equals(userEmail)) {
+//            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access Denied");
+//        }
+//
+//        // B. RAG Retrieval
+//        SearchRequest.Builder requestBuilder = SearchRequest.builder().query(query).topK(3);
+//        if (category != null && !category.isEmpty() && !category.equals("All")) {
+//            requestBuilder.filterExpression("category == '" + category + "'");
+//        }
+//        List<Document> similarDocs = vectorStore.similaritySearch(requestBuilder.build());
+//
+//        // --- CHANGE 1: RELAXED EMPTY CHECK ---
+//        // If docs are empty, normally we stop. BUT if the user says "Yes" or "Tell me more",
+//        // it might be a follow-up to previous context. We let it pass to the AI.
+//        boolean isFollowUp = query.toLowerCase().matches("^(yes|sure|okay|tell me more|go ahead).*");
+//
+//        if (similarDocs.isEmpty() && !isFollowUp) {
+//            return Flux.just("I'm sorry, I couldn't find relevant information in the documents.");
+//        }
+//
+//        String information = similarDocs.stream()
+//                .map(doc -> "Title: " + doc.getMetadata().get("filename") + "\nBody: " + doc.getText())
+//                .collect(Collectors.joining("\n---\n"));
+//
+////         --- CHANGE 2: CONVERSATIONAL PROMPT ---
+//
+//        // --- REVISED PROMPT: PROACTIVE SUGGESTIONS ---
+//        String systemPromptText = """
+//            You are a helpful and intelligent team assistant for the company CMS.
+//
+////            GUIDELINES:
+////            1. **Source of Truth:** Base your answers strictly on the provided DATA and CHAT HISTORY.
+////            2. **Conversational Tone:** Speak naturally, like a human colleague.
+////            3. **Be Smart:** Connect the user's question to relevant concepts in the data.
+//
+//
+//            GUIDELINES:
+//            1. **Source of Truth:** Base your answers on the provided DATA and CHAT HISTORY.
+//            2. **Be Smart:** The user might not use the exact keywords found in the document. Use your understanding of language to connect their question to the relevant concepts in the DATA.
+//            3. **Conversational Tone:** Speak naturally, like a human colleague. You can be polite and helpful.
+//            4. **Handling Gaps:** If the specific answer isn't in the DATA, do not make up facts. Instead, say something like: "I don't see that specific detail in the documents, but I can tell you about [related topic found in data]..." or simply admit you don't know.
+//
+//
+//            **CRITICAL INSTRUCTION - SUGGESTIONS:**
+//            After answering the user's question, look at the provided DATA again.
+//            Identify 2 or 3 other **headings** or **key topics** found in that same text chunk that might be useful for the user.
+//
+//            Append them at the very end of your response in this exact format:
+//
+//            **Want to know more about?**
+//            * [Topic Name 1]
+//            * [Topic Name 2]
+//            * [Topic Name 3]
+//             **Just tell me Yes?**
+//
+//            (Only suggest topics that ACTUALLY exist in the provided DATA text).
+//
+//            (If the user replies 'Yes' to your offer, use the CHAT HISTORY to recall what topic you offered and explain it).
+//
+//            DATA:
+//            {information}
+//            """;
+//
+//
+//        SystemPromptTemplate systemPromptTemplate = new SystemPromptTemplate(systemPromptText);
+//        var systemMessage = systemPromptTemplate.createMessage(Map.of("information", information));
+//
+//        // Auto-Title Logic
+//        if ("New Chat".equals(conversation.getTitle())) {
+//            CompletableFuture.runAsync(() -> generateAndSaveTitle(conversation, query));
+//        }
+//
+//        return chatClient.prompt()
+//                .system(systemMessage.getText())
+//                .user(query)
+//                .advisors(a -> a
+//                        .param("chat_memory_conversation_id", chatId)
+//                        .param("chat_memory_retrieve_size", 10))
+//                .stream()
+//                .content();
+//    }
+//    // --- Helper to Generate Title ---
+//    private void generateAndSaveTitle(UserConversation conversation, String userQuery) {
+//        // We run this in a background thread or just sequentially (fast enough)
+//        try {
+//            String titlePrompt = "Generate a very short title (max 5 words) summarizing this text: " + userQuery;
+//
+//            // We use a separate prompt call.
+//            // NOTE: We pass a dummy ID to avoid messing up the user's main chat memory
+//            String newTitle = chatClient.prompt()
+//                    .user(titlePrompt)
+//                    .advisors(a -> a.param("chat_memory_conversation_id", "system-title-gen"))
+//                    .call()
+//                    .content();
+//
+//            // Clean up text (sometimes AI puts quotes)
+//            newTitle = newTitle.replace("\"", "").trim();
+//
+//            conversation.setTitle(newTitle);
+//            conversationRepository.save(conversation);
+//        } catch (Exception e) {
+//            System.out.println("Error generating title: " + e.getMessage());
+//        }
+//    }
+//
+//
+//    // --- 5. DELETE CONVERSATION ---
+//    @DeleteMapping("/chat/delete/{chatId}")
+//    public ResponseEntity<String> deleteChat(@PathVariable String chatId, @RequestParam String userEmail) {
+//
+//        // 1. Security Check
+//        UserConversation conversation = conversationRepository.findById(chatId)
+//                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Chat not found"));
+//
+//        if (!conversation.getUserEmail().equals(userEmail)) {
+//            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access Denied");
+//        }
+//
+//        // 2. Delete conversation metadata (Your custom table)
+//        conversationRepository.deleteById(chatId);
+//
+//        // 3. Delete actual messages from Spring AI table (The one with vector/text data)
+//        // This executes: DELETE FROM spring_ai_chat_memory WHERE conversation_id = ?
+//        chatMemory.clear(chatId);
+//
+//        return ResponseEntity.ok("Deleted successfully");
+//    }
+//
+//    // --- DTO ---
+//    public record SimpleMessage(String role, String content) {}
+//}
+//
+////
+////// Inject this at the top of controller
+////private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+////
+////// Inside deleteChat method:
+////jdbcTemplate.update("DELETE FROM spring_ai_chat_memory WHERE conversation_id = ?", chatId);
+
+
+
+
+
 
 package com.example.spring_rag.controller;
 
@@ -477,11 +755,13 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.prompt.SystemPromptTemplate;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.tika.TikaDocumentReader;
+import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.multipart.MultipartFile;
@@ -505,14 +785,19 @@ public class BotController {
     private final UserConversationRepository conversationRepository;
     private final ChatMemory chatMemory;
 
+    private final JdbcTemplate jdbcTemplate;
+
+
     public BotController(VectorStore vectorStore,
                          ChatClient.Builder chatClientBuilder,
                          ChatMemory chatMemory,
-                         UserConversationRepository conversationRepository) {
+                         UserConversationRepository conversationRepository,
+                         JdbcTemplate jdbcTemplate) {
 
         this.vectorStore = vectorStore;
         this.conversationRepository = conversationRepository;
         this.chatMemory = chatMemory;
+        this.jdbcTemplate = jdbcTemplate;
 
         this.chatClient = chatClientBuilder
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
@@ -520,15 +805,82 @@ public class BotController {
     }
 
 
+    @GetMapping("/documents")
+    public List<Map<String, Object>> getAllDocuments(@RequestParam(required = false) String category) {
 
-    @PostMapping("/")
-    public String ingest(@RequestParam("file") MultipartFile file) throws IOException {
-        TikaDocumentReader reader = new TikaDocumentReader(new InputStreamResource(file.getInputStream()));
-        List<Document> documents = reader.get();
-        documents.forEach(doc -> doc.getMetadata().put("filename", file.getOriginalFilename()));
-        vectorStore.add(documents);
-        return "Document ingested successfully!";
+        String sql;
+        List<Map<String, Object>> files;
+
+        if (category != null && !category.equals("All")) {
+            // Get unique filenames for a specific category
+            sql = """
+                SELECT DISTINCT metadata->>'filename' as filename, 
+                                metadata->>'category' as category 
+                FROM vector_store 
+                WHERE metadata->>'category' = ?
+                """;
+            files = jdbcTemplate.queryForList(sql, category);
+        } else {
+            // Get ALL unique filenames
+            sql = """
+                SELECT DISTINCT metadata->>'filename' as filename, 
+                                metadata->>'category' as category 
+                FROM vector_store
+                """;
+            files = jdbcTemplate.queryForList(sql);
+        }
+
+        return files;
     }
+
+    // ======================================================
+    // 2. API TO DELETE A FILE (By Filename)
+    // ======================================================
+    // Frontend usage: When user clicks "Delete" icon next to a file
+    @DeleteMapping("/document")
+    public ResponseEntity<String> deleteDocument(@RequestParam String filename) {
+
+        // We delete by filename because one file is split into many chunks with different IDs.
+        String sql = "DELETE FROM vector_store WHERE metadata->>'filename' = ?";
+
+        int rowsAffected = jdbcTemplate.update(sql, filename);
+
+        if (rowsAffected > 0) {
+            return ResponseEntity.ok("Deleted '" + filename + "' (" + rowsAffected + " chunks removed).");
+        } else {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body("File not found: " + filename);
+        }
+    }
+
+
+    @PostMapping("/ingest")
+    public String ingest(@RequestParam("file") MultipartFile file,
+                         @RequestParam("category") String category) throws IOException {
+
+        // 1. Read the raw document (This creates one huge document)
+        TikaDocumentReader reader = new TikaDocumentReader(new InputStreamResource(file.getInputStream()));
+        List<Document> rawDocuments = reader.get();
+
+        // 2. SPLIT THE DOCUMENT
+        // Break it into smaller chunks so it fits the AI model's limit
+        TokenTextSplitter splitter = new TokenTextSplitter();
+        List<Document> splitDocuments = splitter.apply(rawDocuments);
+
+        // 3. ADD METADATA TO CHUNKS
+        // We iterate over the split pieces, not the raw one
+        splitDocuments.forEach(doc -> {
+            Map<String, Object> metadata = doc.getMetadata();
+            metadata.put("filename", file.getOriginalFilename());
+            metadata.put("category", category); // Store the category
+        });
+
+        // 4. Save the chunks to the Vector DB
+        vectorStore.add(splitDocuments);
+
+        return "Document ingested successfully into category: " + category;
+    }
+
 
     // --- 1. START NEW CHAT ---
     @PostMapping("/chat/new")
@@ -573,61 +925,95 @@ public class BotController {
 
     // --- 4. SEARCH / CHAT API ---
     @GetMapping("/search")
-//    @GetMapping(value = "/search", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> search(@RequestParam String query,
                                @RequestParam String chatId,
-                               @RequestParam String userEmail) {
+                               @RequestParam String userEmail,
+                               @RequestParam(required = false) String category) {
 
-        // A. Security Check
+        // A. Security Check (Same as before)
         UserConversation conversation = conversationRepository.findById(chatId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Chat not found"));
-
         if (!conversation.getUserEmail().equals(userEmail)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access Denied");
         }
 
-        // B. RAG Retrieval (Synchronous/Blocking)
-        List<Document> similarDocs = vectorStore.similaritySearch(
-                SearchRequest.builder().query(query).topK(3).build()
-        );
+        // B. RAG Retrieval
+        SearchRequest.Builder requestBuilder = SearchRequest.builder().query(query).topK(3);
+        if (category != null && !category.isEmpty() && !category.equals("All")) {
+            requestBuilder.filterExpression("category == '" + category + "'");
+        }
+        List<Document> similarDocs = vectorStore.similaritySearch(requestBuilder.build());
+
+        // --- CHANGE 1: RELAXED EMPTY CHECK ---
+        // If docs are empty, normally we stop. BUT if the user says "Yes" or "Tell me more",
+        // it might be a follow-up to previous context. We let it pass to the AI.
+        boolean isFollowUp = query.toLowerCase().matches("^(yes|sure|okay|tell me more|go ahead).*");
+
+        if (similarDocs.isEmpty() && !isFollowUp) {
+            return Flux.just("I'm sorry, I couldn't find relevant information in the documents.");
+        }
 
         String information = similarDocs.stream()
                 .map(doc -> "Title: " + doc.getMetadata().get("filename") + "\nBody: " + doc.getText())
                 .collect(Collectors.joining("\n---\n"));
 
-        // C. Construct System Prompt
+//         --- CHANGE 2: CONVERSATIONAL PROMPT ---
+
+        // --- REVISED PROMPT: PROACTIVE SUGGESTIONS ---
         String systemPromptText = """
-            You are a helpful assistant.
-            Use the information provided in the DATA section below.
-            Also use the previous CHAT HISTORY to understand the context.
+            You are a helpful and intelligent team assistant for the company CMS.
+
+//            GUIDELINES:
+//            1. **Source of Truth:** Base your answers strictly on the provided DATA and CHAT HISTORY.
+//            2. **Conversational Tone:** Speak naturally, like a human colleague.
+//            3. **Be Smart:** Connect the user's question to relevant concepts in the data.
+
+
+            GUIDELINES:
+            1. **Source of Truth:** Base your answers on the provided DATA and CHAT HISTORY.
+            2. **Be Smart:** The user might not use the exact keywords found in the document. Use your understanding of language to connect their question to the relevant concepts in the DATA.
+            3. **Conversational Tone:** Speak naturally, like a human colleague. You can be polite and helpful.
+            4. **Handling Gaps:** If the specific answer isn't in the DATA, do not make up facts. Instead, say something like: "I don't see that specific detail in the documents, but I can tell you about [related topic found in data]..." or simply admit you don't know.
+
+
+            **CRITICAL INSTRUCTION - SUGGESTIONS:**
+            After answering the user's question, look at the provided DATA again.
+            Identify 2 or 3 other **headings** or **key topics** found in that same text chunk that might be useful for the user.
+
+            Append them at the very end of your response in this exact format:
+
+            **Want to know more about?**
+            * [Topic Name 1]
+            * [Topic Name 2]
+            * [Topic Name 3]
+             **Just tell me Yes?**
+
+            (Only suggest topics that ACTUALLY exist in the provided DATA text).
+      
+            (If the user replies 'Yes' to your offer, use the CHAT HISTORY to recall what topic you offered and explain it).
+
             DATA:
             {information}
             """;
 
+
         SystemPromptTemplate systemPromptTemplate = new SystemPromptTemplate(systemPromptText);
         var systemMessage = systemPromptTemplate.createMessage(Map.of("information", information));
 
-        // D. AUTO-TITLE LOGIC (Run in Background)
-        // We run this asynchronously so we don't delay the first byte of the stream
+        // Auto-Title Logic
         if ("New Chat".equals(conversation.getTitle())) {
-            CompletableFuture.runAsync(() -> {
-                generateAndSaveTitle(conversation, query);
-            });
+            CompletableFuture.runAsync(() -> generateAndSaveTitle(conversation, query));
         }
 
-        // E. Call AI (Streaming)
-        // We return the Flux directly. Spring Boot handles the streaming to the client.
         return chatClient.prompt()
                 .system(systemMessage.getText())
                 .user(query)
                 .advisors(a -> a
                         .param("chat_memory_conversation_id", chatId)
                         .param("chat_memory_retrieve_size", 10))
-                .stream() // Enable streaming
-                .content(); // Returns Flux<String>
+                .stream()
+                .content();
     }
-
-
     // --- Helper to Generate Title ---
     private void generateAndSaveTitle(UserConversation conversation, String userQuery) {
         // We run this in a background thread or just sequentially (fast enough)
