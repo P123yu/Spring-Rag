@@ -9,7 +9,7 @@
 #
 #  ai:
 #    openai:
-#      api-key: "AIzaSyAN999X9WQYqsV8mBT5wAaLXJRg-pa-X2g"
+#      api-key: ""
 #      base-url: "https://generativelanguage.googleapis.com/v1beta/openai"
 #
 #      # Chat Configuration
@@ -46,7 +46,7 @@ spring:
 
   ai:
     openai:
-      api-key: "AIzaSyAN999X9WQYqsV8mBT5wAaLXJRg-pa-X2g"
+      api-key: ""
       base-url: "https://generativelanguage.googleapis.com/v1beta/openai"
       chat:
         options:
