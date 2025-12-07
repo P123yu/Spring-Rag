@@ -765,6 +765,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 
@@ -1012,8 +1013,27 @@ public class BotController {
                         .param("chat_memory_conversation_id", chatId)
                         .param("chat_memory_retrieve_size", 10))
                 .stream()
-                .content();
+                .content()// ... inside your flux chain
+                .onErrorResume(ex -> {
+                    // 1. Check specifically for Rate Limit (429)
+                    boolean isRateLimit = false;
+
+                    if (ex instanceof WebClientResponseException.TooManyRequests) {
+                        isRateLimit = true;
+                    } else if (ex.getMessage().contains("429")) {
+                        isRateLimit = true;
+                    }
+
+                    if (isRateLimit) {
+                        return Flux.just("\n\nThe server is currently busy . Please try after some time");
+                    }
+
+                    // 2. Handle other errors (Auth, Server Error, etc.)
+                    return Flux.just("\n\n**[System]: An error occurred: " + ex.getMessage() + "**");
+                });
     }
+
+
     // --- Helper to Generate Title ---
     private void generateAndSaveTitle(UserConversation conversation, String userQuery) {
         // We run this in a background thread or just sequentially (fast enough)

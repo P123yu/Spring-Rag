@@ -45,8 +45,14 @@ spring:
       mode: always
 
   ai:
+    retry:
+      max-attempts: 3        # Try 3 times before failing
+      backoff:
+        initial-interval: 2000ms # Wait 2 seconds
+        multiplier: 2.0
+
     openai:
-      api-key: ""
+      api-key: "AIzaSyA2x7mc6th2HEhsvCjCAAtXaFbbfC9ga9g"
       base-url: "https://generativelanguage.googleapis.com/v1beta/openai"
       chat:
         completion-path: "/chat/completions"
